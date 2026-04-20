@@ -1,0 +1,6 @@
+{
+  "name": "Skybox Asset Downloader",
+  "description": "A utility tool to automatically generate and download cube map asset variants (px, nx, py, ny, pz, nz) from a single source URL.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skybox Asset Downloader</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- JSZip for batch downloads -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-20 px-4 md:px-8">
+  <!-- Header -->
+  <header class="max-w-6xl mx-auto py-12 flex flex-col items-center text-center">
+    <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-blue-500/20 text-white">
+      <i data-lucide="image" size="32"></i>
+    </div>
+    <h1 class="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+      Asset Generator
+    </h1>
+    <p class="mt-4 text-slate-400 max-w-lg text-lg">
+      Paste a single cube-map URL to automatically generate all 6 axis variations (px, nx, py, ny, pz, nz).
+    </p>
+  </header>
+
+  <!-- Control Panel -->
+  <main class="max-w-6xl mx-auto">
+    <div class="bg-slate-800/50 backdrop-blur-xl border border-slate-700 p-2 md:p-3 rounded-2xl shadow-2xl mb-12">
+      <form id="urlForm" class="flex flex-col md:flex-row gap-3">
+        <div class="relative flex-grow group">
+          <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+            <i data-lucide="search" size="20" class="text-slate-500 group-focus-within:text-blue-400 transition-colors"></i>
+          </div>
+          <input
+            id="urlInput"
+            type="url"
+            placeholder="https://platform-resources-staging.s3.../2048-px/image.jpeg"
+            class="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-4 pl-12 pr-4 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          class="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-8 rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 flex items-center justify-center gap-2"
+        >
+          Generate Assets
+        </button>
+      </form>
+    </div>
+
+    <!-- Results Area -->
+    <div id="resultsArea" class="hidden space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-slate-800 pb-6">
+        <div class="flex items-center gap-3">
+          <div id="assetCount" class="bg-green-500/10 text-green-400 px-3 py-1 rounded-full text-sm font-medium border border-green-500/20">
+            0 Assets Found
+          </div>
+          <button 
+            id="clearBtn"
+            class="flex items-center gap-2 text-slate-400 hover:text-red-400 transition-colors text-sm px-3 py-1"
+          >
+            <i data-lucide="trash-2" size="16"></i>
+            Clear
+          </button>
+        </div>
+        
+        <button
+          id="downloadAllBtn"
+          class="w-full sm:w-auto bg-slate-100 hover:bg-white text-slate-900 font-bold py-3 px-8 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <span id="downloadText" class="flex items-center gap-2">
+            <i data-lucide="download" size="20"></i>
+            Download All (.zip)
+          </span>
+          <span id="processingText" class="hidden flex items-center gap-2">
+            <i data-lucide="loader-2" size="20" class="animate-spin"></i>
+            Processing...
+          </span>
+        </button>
+      </div>
+
+      <div id="assetGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- Cards will be injected here -->
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="py-20 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-3xl">
+      <div class="p-4 bg-slate-900 rounded-full mb-4">
+        <i data-lucide="image" size="40"></i>
+      </div>
+      <p class="text-lg">No assets generated yet</p>
+      <p class="text-sm">Enter a valid S3 image URL to begin</p>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="max-w-6xl mx-auto mt-20 pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 text-slate-500 text-sm">
+    <p>&copy; 2026 Skybox Tool. Built for visual consistency.</p>
+    <div class="flex items-center gap-6">
+      <a href="#" class="hover:text-blue-400 transition-colors">Documentation</a>
+      <a href="#" class="hover:text-blue-400 transition-colors">API Reference</a>
+      <a href="#" class="flex items-center gap-1 hover:text-white transition-colors">
+        <i data-lucide="github" size="16"></i>
+        Source
+      </a>
+    </div>
+  </footer>
+
+  <script>
+    // Asset Management
+    let currentAssets = [];
+    const SUFFIXES = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
+
+    // DOM Elements
+    const urlForm = document.getElementById('urlForm');
+    const urlInput = document.getElementById('urlInput');
+    const resultsArea = document.getElementById('resultsArea');
+    const emptyState = document.getElementById('emptyState');
+    const assetGrid = document.getElementById('assetGrid');
+    const assetCount = document.getElementById('assetCount');
+    const clearBtn = document.getElementById('clearBtn');
+    const downloadAllBtn = document.getElementById('downloadAllBtn');
+    const downloadText = document.getElementById('downloadText');
+    const processingText = document.getElementById('processingText');
+
+    // Initialization
+    function init() {
+      lucide.createIcons();
+    }
+
+    urlForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const url = urlInput.value.trim();
+      if (!url) return;
+
+      const assets = parseAndGenerateUrls(url);
+      if (assets.length > 0) {
+        currentAssets = assets;
+        renderAssets();
+      } else {
+        alert("Invalid URL format. Expected pattern like: .../2048-px/filename.jpeg");
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      currentAssets = [];
+      urlInput.value = '';
+      renderAssets();
+    });
+
+    downloadAllBtn.addEventListener('click', handleDownloadAll);
+
+    // Logic Functions
+    function parseAndGenerateUrls(inputUrl) {
+      const regex = /^(.*\/)(\d+-)([pn][xyz])(\/.*)$/;
+      const match = inputUrl.match(regex);
+
+      if (!match) return [];
+
+      const [_, prefix, baseSize, currentSuffix, filename] = match;
+
+      return SUFFIXES.map((suffix) => ({
+        id: `${baseSize}${suffix}`,
+        name: `${baseSize.replace('-', '')}${suffix}`,
+        suffix: suffix,
+        url: `${prefix}${baseSize}${suffix}${filename}`
+      }));
+    }
+
+    async function downloadFile(url, filename) {
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
+      } catch (error) {
+        console.error('Download failed:', error);
+        window.open(url, '_blank');
+      }
+    }
+
+    async function handleDownloadAll() {
+      if (currentAssets.length === 0) return;
+      
+      toggleLoading(true);
+
+      try {
+        const zip = new JSZip();
+        const promises = currentAssets.map(async (asset) => {
+          const response = await fetch(asset.url);
+          const blob = await response.blob();
+          zip.file(`${asset.name}.jpeg`, blob);
+        });
+
+        await Promise.all(promises);
+        const content = await zip.generateAsync({ type: 'blob' });
+        const blobUrl = window.URL.createObjectURL(content);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `skybox_assets_${Date.now()}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
+      } catch (error) {
+        console.error('Batch download failed:', error);
+        alert('Could not create ZIP. Falling back to individual downloads...');
+        for (const asset of currentAssets) {
+          await downloadFile(asset.url, `${asset.name}.jpeg`);
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      } finally {
+        toggleLoading(false);
+      }
+    }
+
+    function toggleLoading(isLoading) {
+      downloadAllBtn.disabled = isLoading;
+      if (isLoading) {
+        downloadText.classList.add('hidden');
+        processingText.classList.remove('hidden');
+      } else {
+        downloadText.classList.remove('hidden');
+        processingText.classList.add('hidden');
+      }
+    }
+
+    function renderAssets() {
+      if (currentAssets.length === 0) {
+        resultsArea.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      resultsArea.classList.remove('hidden');
+      assetCount.textContent = `${currentAssets.length} Assets Found`;
+      assetGrid.innerHTML = '';
+
+      currentAssets.forEach(asset => {
+        const card = document.createElement('div');
+        card.className = "bg-slate-800 rounded-xl overflow-hidden border border-slate-700 hover:border-blue-500 transition-all duration-300 group";
+        card.innerHTML = `
+          <div class="relative aspect-square overflow-hidden bg-slate-900">
+            <img 
+              src="${asset.url}" 
+              alt="${asset.name}"
+              class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+              loading="lazy"
+              onerror="this.src='https://picsum.photos/400/400?text=Error'"
+            />
+            <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+               <button 
+                onclick="downloadFile('${asset.url}', '${asset.name}.jpeg')"
+                class="p-3 bg-blue-600 rounded-full hover:bg-blue-500 transition-colors shadow-lg"
+                title="Download"
+              >
+                <i data-lucide="download" size="20" class="text-white"></i>
+              </button>
+              <a 
+                href="${asset.url}" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                class="p-3 bg-slate-700 rounded-full hover:bg-slate-600 transition-colors shadow-lg"
+                title="Open in new tab"
+              >
+                <i data-lucide="external-link" size="20" class="text-white"></i>
+              </a>
+            </div>
+          </div>
+          <div class="p-4 flex items-center justify-between">
+            <div>
+              <h3 class="font-semibold text-slate-200">${asset.name}</h3>
+              <p class="text-xs text-slate-500 uppercase tracking-widest mt-1">
+                Cube Map Side: ${asset.suffix.toUpperCase()}
+              </p>
+            </div>
+            <button 
+              onclick="downloadFile('${asset.url}', '${asset.name}.jpeg')"
+              class="text-blue-400 hover:text-blue-300 transition-colors p-1"
+            >
+              <i data-lucide="download" size="18"></i>
+            </button>
+          </div>
+        `;
+        assetGrid.appendChild(card);
+      });
+
+      // Refresh icons for new cards
+      lucide.createIcons();
+    }
+
+    // Initial render call
+    init();
+  </script>
+</body>
+</html>
